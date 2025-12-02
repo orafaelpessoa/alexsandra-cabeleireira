@@ -1,0 +1,391 @@
+import { motion } from "framer-motion";
+import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Calendar } from "@/components/ui/calendar";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { format, parse, addMinutes } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { PaymentDialog } from "./PaymentDialog";
+
+interface Service {
+  id: string;
+  name: string;
+  duration: number;
+  price: number;
+}
+
+interface Booking {
+  booking_date: string;
+  booking_time: string;
+  service_id: string;
+}
+
+const TIME_SLOTS = [
+  "08:30", "09:00", "09:30", "10:00", "10:30",
+  "11:00", "11:30", "12:00", "12:30", "13:00", "13:30",
+  "14:00", "14:30", "15:00", "15:30", "16:00", "16:30",
+  "17:00", "17:30", "18:00"
+];
+
+export const BookingForm = () => {
+  const [services, setServices] = useState<Service[]>([]);
+  const [selectedService, setSelectedService] = useState<string>("");
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [selectedDate, setSelectedDate] = useState<Date>();
+  const [selectedTime, setSelectedTime] = useState("");
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [showPaymentDialog, setShowPaymentDialog] = useState(false);
+  const [pendingBookingData, setPendingBookingData] = useState<any>(null);
+
+  useEffect(() => {
+    fetchServices();
+  }, []);
+
+  useEffect(() => {
+    if (selectedDate) {
+      fetchBookings(selectedDate);
+    }
+  }, [selectedDate]);
+
+  const fetchServices = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("services")
+        .select("id, name, duration, price")
+        .order("name");
+
+      if (error) throw error;
+      setServices(data || []);
+    } catch (error) {
+      console.error("Error fetching services:", error);
+    }
+  };
+
+  const fetchBookings = async (date: Date) => {
+    try {
+      const dateStr = format(date, "yyyy-MM-dd");
+      const { data, error } = await supabase
+        .from("bookings")
+        .select("booking_date, booking_time, service_id")
+        .eq("booking_date", dateStr)
+        .in("status", ["pending", "confirmed"]);
+
+      if (error) throw error;
+      setBookings(data || []);
+    } catch (error) {
+      console.error("Error fetching bookings:", error);
+    }
+  };
+
+  const formatDuration = (minutes: number): string => {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (hours === 0) return `${mins}min`;
+    if (mins === 0) return `${hours}h`;
+    return `${hours}h${mins}min`;
+  };
+
+  const isTimeSlotOccupied = (time: string, duration: number) => {
+    if (!selectedDate) return false;
+    const dateStr = format(selectedDate, "yyyy-MM-dd");
+    
+    // Parse o horário atual
+    const timeDate = parse(time, "HH:mm", new Date());
+    
+    // Verifica cada agendamento existente
+    for (const booking of bookings) {
+      if (booking.booking_date !== dateStr) continue;
+      
+      // Pega a duração do serviço agendado
+      const bookedService = services.find(s => s.id === booking.service_id);
+      if (!bookedService) continue;
+      
+      const bookedStart = parse(booking.booking_time, "HH:mm", new Date());
+      const bookedEnd = addMinutes(bookedStart, bookedService.duration);
+      const currentEnd = addMinutes(timeDate, duration);
+      
+      // Verifica se há sobreposição
+      if (
+        (timeDate >= bookedStart && timeDate < bookedEnd) || // Começa durante um agendamento
+        (currentEnd > bookedStart && currentEnd <= bookedEnd) || // Termina durante um agendamento
+        (timeDate <= bookedStart && currentEnd >= bookedEnd) // Engloba um agendamento
+      ) {
+        return true;
+      }
+    }
+    
+    return false;
+  };
+
+  const isTimeSlotAvailable = (time: string) => {
+    if (!selectedService) return true;
+    const service = services.find(s => s.id === selectedService);
+    if (!service) return true;
+    
+    return !isTimeSlotOccupied(time, service.duration);
+  };
+
+  const isDateAvailable = (date: Date) => {
+    // Check if it's Sunday (0) or Monday (1)
+    const dayOfWeek = date.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 1) {
+      return false;
+    }
+    
+    const dateStr = format(date, "yyyy-MM-dd");
+    const bookedSlots = bookings.filter((b) => b.booking_date === dateStr).length;
+    return bookedSlots < TIME_SLOTS.length;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!selectedService || !customerName || !customerPhone || !selectedDate || !selectedTime) {
+      toast.error("Por favor, preencha todos os campos");
+      return;
+    }
+
+    // Preparar dados do agendamento
+    const bookingData = {
+      service_id: selectedService,
+      customer_name: customerName,
+      customer_phone: customerPhone,
+      booking_date: format(selectedDate, "yyyy-MM-dd"),
+      booking_time: selectedTime,
+      status: "pending" as const,
+      payment_status: "pending" as const,
+    };
+
+    setPendingBookingData(bookingData);
+    setShowPaymentDialog(true);
+  };
+
+  const completeBooking = async (paymentStatus: "pending" | "paid") => {
+    if (!pendingBookingData) return;
+
+    setLoading(true);
+
+    try {
+      const { error } = await supabase.from("bookings").insert({
+        ...pendingBookingData,
+        payment_status: paymentStatus,
+      });
+
+      if (error) throw error;
+
+      const service = services.find((s) => s.id === selectedService);
+      const paymentText = paymentStatus === "paid" 
+        ? "\n\n✅ *Pagamento:* Pago via PIX" 
+        : "\n\n💳 *Pagamento:* Será realizado presencialmente";
+      
+      const message = `Olá! Gostaria de agendar:\n\n*Serviço:* ${service?.name}\n*Data:* ${format(selectedDate!, "dd/MM/yyyy", { locale: ptBR })}\n*Horário:* ${selectedTime}\n*Nome:* ${customerName}\n*Telefone:* ${customerPhone}${paymentText}`;
+      
+      const whatsappUrl = `https://wa.me/5583988888888?text=${encodeURIComponent(message)}`;
+      window.open(whatsappUrl, "_blank");
+
+      toast.success("Agendamento realizado! Você será redirecionado para o WhatsApp.");
+
+      // Reset form
+      setSelectedService("");
+      setCustomerName("");
+      setCustomerPhone("");
+      setSelectedDate(undefined);
+      setSelectedTime("");
+      setPendingBookingData(null);
+    } catch (error) {
+      console.error("Error creating booking:", error);
+      toast.error("Erro ao realizar agendamento. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <section id="booking" className="py-20 px-4 bg-secondary/30">
+      <div className="container mx-auto max-w-4xl">
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.6 }}
+        >
+          <h2 className="mb-12 text-center text-4xl font-bold">Agende seu Horário</h2>
+        </motion.div>
+
+        <motion.form
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.6, delay: 0.2 }}
+          onSubmit={handleSubmit}
+          className="glass-effect rounded-2xl p-8 shadow-medium"
+        >
+          <div className="space-y-6">
+            {/* Service Selection */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+            >
+              <Label htmlFor="service" className="text-base font-semibold">Serviço</Label>
+              <Select value={selectedService} onValueChange={setSelectedService}>
+                <SelectTrigger className="mt-2 h-12 border-2 hover:border-primary/40 transition-colors">
+                  <SelectValue placeholder="Selecione um serviço" />
+                </SelectTrigger>
+                <SelectContent>
+                  {services.map((service) => (
+                    <SelectItem key={service.id} value={service.id}>
+                      {service.name} - R$ {service.price.toFixed(2)} ({formatDuration(service.duration)})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </motion.div>
+
+            {/* Customer Info */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="grid gap-6 md:grid-cols-2"
+            >
+              <div>
+                <Label htmlFor="name" className="text-base font-semibold">Nome Completo</Label>
+                <Input
+                  id="name"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  placeholder="Seu nome completo"
+                  className="mt-2 h-12 border-2 hover:border-primary/40 transition-colors"
+                />
+              </div>
+              <div>
+                <Label htmlFor="phone" className="text-base font-semibold">Telefone</Label>
+                <Input
+                  id="phone"
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  placeholder="(00) 00000-0000"
+                  className="mt-2 h-12 border-2 hover:border-primary/40 transition-colors"
+                />
+              </div>
+            </motion.div>
+
+            {/* Date Selection */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="space-y-2"
+            >
+              <Label className="text-base font-semibold">Escolha a Data</Label>
+              <div className="flex justify-center rounded-lg border-2 border-primary/20 bg-card p-4 hover:border-primary/40 transition-colors shadow-soft">
+                <Calendar
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={setSelectedDate}
+                  disabled={(date) => {
+                    // Desabilitar domingos e segundas
+                    const dayOfWeek = date.getDay();
+                    if (dayOfWeek === 0 || dayOfWeek === 1) return true;
+                    // Desabilitar datas passadas
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    if (date < today) return true;
+                    // Desabilitar datas totalmente ocupadas
+                    return !isDateAvailable(date);
+                  }}
+                  className="rounded-md pointer-events-auto"
+                  locale={ptBR}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground text-center bg-accent/20 rounded-md py-2 px-3">
+                📅 Atendimento: Terça a Sábado, 08:30 às 18:00
+              </p>
+            </motion.div>
+
+            {/* Time Selection */}
+            {selectedDate && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.4 }}
+                className="space-y-3"
+              >
+                <Label className="text-base font-semibold">Escolha o Horário</Label>
+                <div className="mt-2 grid grid-cols-3 gap-2 md:grid-cols-6 lg:grid-cols-9">
+                  {TIME_SLOTS.map((time) => {
+                    const available = isTimeSlotAvailable(time);
+                    return (
+                      <Button
+                        key={time}
+                        type="button"
+                        variant={selectedTime === time ? "default" : "outline"}
+                        disabled={!available}
+                        onClick={() => setSelectedTime(time)}
+                        className={`
+                          transition-all hover:scale-105
+                          ${!available ? "opacity-30 cursor-not-allowed" : ""}
+                          ${selectedTime === time ? "ring-2 ring-primary ring-offset-2" : ""}
+                        `}
+                      >
+                        {time}
+                      </Button>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            )}
+
+            {/* Submit */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.5 }}
+              className="space-y-4 pt-4"
+            >
+              <Button
+                type="submit"
+                size="lg"
+                className="w-full bg-primary hover:bg-primary-dark text-primary-foreground font-semibold h-14 text-lg shadow-medium hover:shadow-strong transition-all hover:scale-[1.02]"
+                disabled={loading}
+              >
+                {loading ? "Agendando..." : "Agendar via WhatsApp"}
+              </Button>
+
+              <div className="space-y-2 rounded-lg bg-accent/30 border-2 border-primary/10 p-4">
+                <p className="text-center text-sm font-semibold text-foreground">💳 Formas de Pagamento</p>
+                <p className="text-center text-xs text-muted-foreground leading-relaxed">
+                  💰 Dinheiro em espécie (presencial)<br />
+                  💳 Cartão de crédito/débito (presencial)<br />
+                  💵 PIX (pelo site ou presencial - você escolhe!)
+                </p>
+              </div>
+            </motion.div>
+          </div>
+        </motion.form>
+
+        <PaymentDialog
+          open={showPaymentDialog}
+          onOpenChange={setShowPaymentDialog}
+          amount={services.find(s => s.id === selectedService)?.price || 0}
+          customerName={customerName}
+          onPayNow={() => completeBooking("paid")}
+          onPayLater={() => completeBooking("pending")}
+        />
+      </div>
+    </section>
+  );
+};
