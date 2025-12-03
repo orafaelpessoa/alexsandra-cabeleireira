@@ -31,10 +31,26 @@ interface Booking {
 }
 
 const TIME_SLOTS = [
-  "08:30", "09:00", "09:30", "10:00", "10:30",
-  "11:00", "11:30", "12:00", "12:30", "13:00", "13:30",
-  "14:00", "14:30", "15:00", "15:30", "16:00", "16:30",
-  "17:00", "17:30", "18:00"
+  "08:30",
+  "09:00",
+  "09:30",
+  "10:00",
+  "10:30",
+  "11:00",
+  "11:30",
+  "12:00",
+  "12:30",
+  "13:00",
+  "13:30",
+  "14:00",
+  "14:30",
+  "15:00",
+  "15:30",
+  "16:00",
+  "16:30",
+  "17:00",
+  "17:30",
+  "18:00",
 ];
 
 export const BookingForm = () => {
@@ -48,10 +64,26 @@ export const BookingForm = () => {
   const [loading, setLoading] = useState(false);
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
   const [pendingBookingData, setPendingBookingData] = useState<any>(null);
+  const [whatsappNumber, setWhatsappNumber] = useState<string>("");
 
   useEffect(() => {
+    fetchSiteSettings();
     fetchServices();
   }, []);
+
+  const fetchSiteSettings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("site_settings")
+        .select("phone")
+        .single();
+
+      if (error) throw error;
+      setWhatsappNumber(data.phone);
+    } catch (error) {
+      console.error("Erro ao buscar site settings:", error);
+    }
+  };
 
   useEffect(() => {
     if (selectedDate) {
@@ -98,42 +130,55 @@ export const BookingForm = () => {
   };
 
   const isTimeSlotOccupied = (time: string, duration: number) => {
-    if (!selectedDate) return false;
-    const dateStr = format(selectedDate, "yyyy-MM-dd");
-    
-    // Parse o horário atual
-    const timeDate = parse(time, "HH:mm", new Date());
-    
-    // Verifica cada agendamento existente
-    for (const booking of bookings) {
-      if (booking.booking_date !== dateStr) continue;
-      
-      // Pega a duração do serviço agendado
-      const bookedService = services.find(s => s.id === booking.service_id);
-      if (!bookedService) continue;
-      
-      const bookedStart = parse(booking.booking_time, "HH:mm", new Date());
-      const bookedEnd = addMinutes(bookedStart, bookedService.duration);
-      const currentEnd = addMinutes(timeDate, duration);
-      
-      // Verifica se há sobreposição
-      if (
-        (timeDate >= bookedStart && timeDate < bookedEnd) || // Começa durante um agendamento
-        (currentEnd > bookedStart && currentEnd <= bookedEnd) || // Termina durante um agendamento
-        (timeDate <= bookedStart && currentEnd >= bookedEnd) // Engloba um agendamento
-      ) {
-        return true;
-      }
+  if (!selectedDate) return false;
+
+  const timeDate = parse(
+    `${format(selectedDate, "yyyy-MM-dd")} ${time}`,
+    "yyyy-MM-dd HH:mm",
+    new Date()
+  );
+
+  for (const booking of bookings) {
+    if (!booking.booking_date || !booking.booking_time) continue;
+
+    const bookedService = services.find((s) => s.id === booking.service_id);
+    if (!bookedService) continue;
+
+    // Remove segundos do booking_time, se existir
+    const bookingTimeClean = booking.booking_time.split(":").slice(0, 2).join(":");
+
+    const bookedStart = parse(
+      `${booking.booking_date} ${bookingTimeClean}`,
+      "yyyy-MM-dd HH:mm",
+      new Date()
+    );
+
+    if (isNaN(bookedStart.getTime())) continue; // ignora se parse falhar
+
+    const bookedEnd = addMinutes(bookedStart, bookedService.duration);
+    const currentEnd = addMinutes(timeDate, duration);
+
+    console.log("Checking slot:", timeDate);
+    console.log("Existing booking:", bookedStart, bookedEnd, bookedService?.name);
+
+    if (
+      (timeDate >= bookedStart && timeDate < bookedEnd) ||
+      (currentEnd > bookedStart && currentEnd <= bookedEnd) ||
+      (timeDate <= bookedStart && currentEnd >= bookedEnd)
+    ) {
+      return true;
     }
-    
-    return false;
-  };
+  }
+
+  return false;
+};
+
 
   const isTimeSlotAvailable = (time: string) => {
     if (!selectedService) return true;
-    const service = services.find(s => s.id === selectedService);
+    const service = services.find((s) => s.id === selectedService);
     if (!service) return true;
-    
+
     return !isTimeSlotOccupied(time, service.duration);
   };
 
@@ -143,16 +188,24 @@ export const BookingForm = () => {
     if (dayOfWeek === 0 || dayOfWeek === 1) {
       return false;
     }
-    
+
     const dateStr = format(date, "yyyy-MM-dd");
-    const bookedSlots = bookings.filter((b) => b.booking_date === dateStr).length;
+    const bookedSlots = bookings.filter(
+      (b) => b.booking_date === dateStr
+    ).length;
     return bookedSlots < TIME_SLOTS.length;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!selectedService || !customerName || !customerPhone || !selectedDate || !selectedTime) {
+    if (
+      !selectedService ||
+      !customerName ||
+      !customerPhone ||
+      !selectedDate ||
+      !selectedTime
+    ) {
       toast.error("Por favor, preencha todos os campos");
       return;
     }
@@ -186,16 +239,26 @@ export const BookingForm = () => {
       if (error) throw error;
 
       const service = services.find((s) => s.id === selectedService);
-      const paymentText = paymentStatus === "paid" 
-        ? "\n\n✅ *Pagamento:* Pago via PIX" 
-        : "\n\n💳 *Pagamento:* Será realizado presencialmente";
-      
-      const message = `Olá! Gostaria de agendar:\n\n*Serviço:* ${service?.name}\n*Data:* ${format(selectedDate!, "dd/MM/yyyy", { locale: ptBR })}\n*Horário:* ${selectedTime}\n*Nome:* ${customerName}\n*Telefone:* ${customerPhone}${paymentText}`;
-      
-      const whatsappUrl = `https://wa.me/5583988888888?text=${encodeURIComponent(message)}`;
+      const paymentText =
+        paymentStatus === "paid"
+          ? "\n\n✅ *Pagamento:* Pago via PIX"
+          : "\n\n💳 *Pagamento:* Será realizado presencialmente";
+
+      const message = `Olá! Gostaria de agendar:\n\n*Serviço:* ${
+        service?.name
+      }\n*Data:* ${format(selectedDate!, "dd/MM/yyyy", {
+        locale: ptBR,
+      })}\n*Horário:* ${selectedTime}\n*Nome:* ${customerName}\n*Telefone:* ${customerPhone}${paymentText}`;
+
+      const formattedNumber = whatsappNumber.replace(/\D/g, "");
+      const whatsappUrl = `https://wa.me/${formattedNumber}?text=${encodeURIComponent(
+        message
+      )}`;
       window.open(whatsappUrl, "_blank");
 
-      toast.success("Agendamento realizado! Você será redirecionado para o WhatsApp.");
+      toast.success(
+        "Agendamento realizado! Você será redirecionado para o WhatsApp."
+      );
 
       // Reset form
       setSelectedService("");
@@ -221,7 +284,9 @@ export const BookingForm = () => {
           viewport={{ once: true }}
           transition={{ duration: 0.6 }}
         >
-          <h2 className="mb-12 text-center text-4xl font-bold">Agende seu Horário</h2>
+          <h2 className="mb-12 text-center text-4xl font-bold">
+            Agende seu Horário
+          </h2>
         </motion.div>
 
         <motion.form
@@ -239,15 +304,21 @@ export const BookingForm = () => {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
             >
-              <Label htmlFor="service" className="text-base font-semibold">Serviço</Label>
-              <Select value={selectedService} onValueChange={setSelectedService}>
+              <Label htmlFor="service" className="text-base font-semibold">
+                Serviço
+              </Label>
+              <Select
+                value={selectedService}
+                onValueChange={setSelectedService}
+              >
                 <SelectTrigger className="mt-2 h-12 border-2 hover:border-primary/40 transition-colors">
                   <SelectValue placeholder="Selecione um serviço" />
                 </SelectTrigger>
                 <SelectContent>
                   {services.map((service) => (
                     <SelectItem key={service.id} value={service.id}>
-                      {service.name} - R$ {service.price.toFixed(2)} ({formatDuration(service.duration)})
+                      {service.name} - R$ {service.price.toFixed(2)} (
+                      {formatDuration(service.duration)})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -262,7 +333,9 @@ export const BookingForm = () => {
               className="grid gap-6 md:grid-cols-2"
             >
               <div>
-                <Label htmlFor="name" className="text-base font-semibold">Nome Completo</Label>
+                <Label htmlFor="name" className="text-base font-semibold">
+                  Nome Completo
+                </Label>
                 <Input
                   id="name"
                   value={customerName}
@@ -272,7 +345,9 @@ export const BookingForm = () => {
                 />
               </div>
               <div>
-                <Label htmlFor="phone" className="text-base font-semibold">Telefone</Label>
+                <Label htmlFor="phone" className="text-base font-semibold">
+                  Telefone
+                </Label>
                 <Input
                   id="phone"
                   value={customerPhone}
@@ -324,7 +399,9 @@ export const BookingForm = () => {
                 transition={{ delay: 0.4 }}
                 className="space-y-3"
               >
-                <Label className="text-base font-semibold">Escolha o Horário</Label>
+                <Label className="text-base font-semibold">
+                  Escolha o Horário
+                </Label>
                 <div className="mt-2 grid grid-cols-3 gap-2 md:grid-cols-6 lg:grid-cols-9">
                   {TIME_SLOTS.map((time) => {
                     const available = isTimeSlotAvailable(time);
@@ -336,9 +413,13 @@ export const BookingForm = () => {
                         disabled={!available}
                         onClick={() => setSelectedTime(time)}
                         className={`
-                          transition-all hover:scale-105
-                          ${!available ? "opacity-30 cursor-not-allowed" : ""}
-                          ${selectedTime === time ? "ring-2 ring-primary ring-offset-2" : ""}
+                        transition-all hover:scale-105
+                       ${!available ? "opacity-30 cursor-not-allowed" : ""}
+                       ${
+                         selectedTime === time
+                           ? "ring-2 ring-primary ring-offset-2"
+                           : ""
+                       }
                         `}
                       >
                         {time}
@@ -366,10 +447,14 @@ export const BookingForm = () => {
               </Button>
 
               <div className="space-y-2 rounded-lg bg-accent/30 border-2 border-primary/10 p-4">
-                <p className="text-center text-sm font-semibold text-foreground">💳 Formas de Pagamento</p>
+                <p className="text-center text-sm font-semibold text-foreground">
+                  💳 Formas de Pagamento
+                </p>
                 <p className="text-center text-xs text-muted-foreground leading-relaxed">
-                  💰 Dinheiro em espécie (presencial)<br />
-                  💳 Cartão de crédito/débito (presencial)<br />
+                  💰 Dinheiro em espécie (presencial)
+                  <br />
+                  💳 Cartão de crédito/débito (presencial)
+                  <br />
                   💵 PIX (pelo site ou presencial - você escolhe!)
                 </p>
               </div>
@@ -380,7 +465,7 @@ export const BookingForm = () => {
         <PaymentDialog
           open={showPaymentDialog}
           onOpenChange={setShowPaymentDialog}
-          amount={services.find(s => s.id === selectedService)?.price || 0}
+          amount={services.find((s) => s.id === selectedService)?.price || 0}
           customerName={customerName}
           onPayNow={() => completeBooking("paid")}
           onPayLater={() => completeBooking("pending")}
