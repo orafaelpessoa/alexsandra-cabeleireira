@@ -58,7 +58,7 @@ export const BookingForm = () => {
   const [selectedService, setSelectedService] = useState<string>("");
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
-  const [selectedDate, setSelectedDate] = useState<Date>();
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedTime, setSelectedTime] = useState("");
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(false);
@@ -66,11 +66,31 @@ export const BookingForm = () => {
   const [pendingBookingData, setPendingBookingData] = useState<any>(null);
   const [whatsappNumber, setWhatsappNumber] = useState<string>("");
 
+  // new: set of occupied slots for the selectedDate (strings "HH:mm")
+  const [occupiedSlots, setOccupiedSlots] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     fetchSiteSettings();
     fetchServices();
   }, []);
 
+  useEffect(() => {
+    if (selectedDate) {
+      fetchBookings(selectedDate);
+    } else {
+      // if no date selected, clear bookings and occupiedSlots
+      setBookings([]);
+      setOccupiedSlots(new Set());
+    }
+  }, [selectedDate]);
+
+  // recompute occupied slots whenever bookings, services or date change
+  useEffect(() => {
+    computeOccupiedSlots();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookings, services, selectedDate]);
+
+  // -------------------- FETCH SITE SETTINGS (WhatsApp) --------------------
   const fetchSiteSettings = async () => {
     try {
       const { data, error } = await supabase
@@ -79,17 +99,12 @@ export const BookingForm = () => {
         .single();
 
       if (error) throw error;
-      setWhatsappNumber(data.phone);
+      setWhatsappNumber(data?.phone || "");
     } catch (error) {
       console.error("Erro ao buscar site settings:", error);
     }
   };
-
-  useEffect(() => {
-    if (selectedDate) {
-      fetchBookings(selectedDate);
-    }
-  }, [selectedDate]);
+  // ----------------------------------------------------------------------
 
   const fetchServices = async () => {
     try {
@@ -129,75 +144,160 @@ export const BookingForm = () => {
     return `${hours}h${mins}min`;
   };
 
+  // -------------------- isTimeSlotOccupied (robust final) --------------------
   const isTimeSlotOccupied = (time: string, duration: number) => {
   if (!selectedDate) return false;
 
+  const dateStr = format(selectedDate, "yyyy-MM-dd");
+
+  // Normaliza o slot selecionado para HH:mm:00
+  const slotWithSeconds = `${time}:00`;
+
   const timeDate = parse(
-    `${format(selectedDate, "yyyy-MM-dd")} ${time}`,
-    "yyyy-MM-dd HH:mm",
+    `${dateStr} ${slotWithSeconds}`,
+    "yyyy-MM-dd HH:mm:ss",
     new Date()
   );
 
+  if (isNaN(timeDate.getTime())) return false;
+
+  const currentEnd = addMinutes(timeDate, duration);
+
+  // Verifica cada agendamento existente
   for (const booking of bookings) {
-    if (!booking.booking_date || !booking.booking_time) continue;
+    if (booking.booking_date !== dateStr) continue;
+
+    let bookingTimeClean = booking.booking_time;
+    if (bookingTimeClean.length === 5) {
+      bookingTimeClean = `${bookingTimeClean}:00`;
+    }
+
+    const bookedStart = parse(
+      `${booking.booking_date} ${bookingTimeClean}`,
+      "yyyy-MM-dd HH:mm:ss",
+      new Date()
+    );
+
+    if (isNaN(bookedStart.getTime())) continue;
 
     const bookedService = services.find((s) => s.id === booking.service_id);
     if (!bookedService) continue;
 
-    // Remove segundos do booking_time, se existir
-    const bookingTimeClean = booking.booking_time.split(":").slice(0, 2).join(":");
-
-    const bookedStart = parse(
-      `${booking.booking_date} ${bookingTimeClean}`,
-      "yyyy-MM-dd HH:mm",
-      new Date()
-    );
-
-    if (isNaN(bookedStart.getTime())) continue; // ignora se parse falhar
-
     const bookedEnd = addMinutes(bookedStart, bookedService.duration);
-    const currentEnd = addMinutes(timeDate, duration);
 
-    console.log("Checking slot:", timeDate);
-    console.log("Existing booking:", bookedStart, bookedEnd, bookedService?.name);
-
-    if (
+    // AQUI está a lógica correta (sempre pra frente)
+    const overlap =
       (timeDate >= bookedStart && timeDate < bookedEnd) ||
       (currentEnd > bookedStart && currentEnd <= bookedEnd) ||
-      (timeDate <= bookedStart && currentEnd >= bookedEnd)
-    ) {
-      return true;
-    }
+      (timeDate <= bookedStart && currentEnd >= bookedEnd);
+
+    if (overlap) return true;
   }
 
   return false;
 };
 
 
-  const isTimeSlotAvailable = (time: string) => {
-    if (!selectedService) return true;
-    const service = services.find((s) => s.id === selectedService);
-    if (!service) return true;
+  // ----------------------------------------------------------------------
 
-    return !isTimeSlotOccupied(time, service.duration);
+  const isTimeSlotAvailable = (time: string) => {
+    if (!selectedService) {
+      // if no service selected, availability is false only if slot is already occupied by any booking
+      return !occupiedSlots.has(time);
+    }
+    const service = services.find((s) => s.id === selectedService);
+    if (!service) {
+      return !occupiedSlots.has(time);
+    }
+    // both checks: not globally occupied AND not overlapping with selected service duration
+    return (
+      !occupiedSlots.has(time) && !isTimeSlotOccupied(time, service.duration)
+    );
   };
 
   const isDateAvailable = (date: Date) => {
-    // Check if it's Sunday (0) or Monday (1)
+    // disable Sundays(0) and Mondays(1)
     const dayOfWeek = date.getDay();
     if (dayOfWeek === 0 || dayOfWeek === 1) {
       return false;
     }
 
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (date < today) return false;
+
+    // compute if fully occupied
     const dateStr = format(date, "yyyy-MM-dd");
-    const bookedSlots = bookings.filter(
-      (b) => b.booking_date === dateStr
-    ).length;
-    return bookedSlots < TIME_SLOTS.length;
+    // count unique occupied slots for that date
+    if (selectedDate && format(selectedDate, "yyyy-MM-dd") === dateStr) {
+      return occupiedSlots.size < TIME_SLOTS.length;
+    }
+
+    // if not the selectedDate, we could fetch bookings for that date on hover — but keep default true
+    return true;
   };
+
+  // -------------------- generateSlotsBetween & computeOccupiedSlots --------------------
+  const generateSlotsBetween = (start: Date, end: Date) => {
+    const slots: string[] = [];
+    let cur = start;
+    // keep generating slots while cur < end
+    while (cur < end) {
+      slots.push(format(cur, "HH:mm"));
+      cur = addMinutes(cur, 30); // step 30 minutes
+    }
+    return slots;
+  };
+
+  const computeOccupiedSlots = () => {
+    const occupied = new Set<string>();
+    if (!selectedDate) {
+      setOccupiedSlots(occupied);
+      return;
+    }
+    const dateStr = format(selectedDate, "yyyy-MM-dd");
+
+    for (const booking of bookings) {
+      if (!booking.booking_date || !booking.booking_time) continue;
+      if (booking.booking_date !== dateStr) continue;
+
+      const bookedService = services.find((s) => s.id === booking.service_id);
+      if (!bookedService) continue;
+
+      let bookingTimeClean = booking.booking_time;
+      if (bookingTimeClean.length === 5) {
+        bookingTimeClean = `${bookingTimeClean}:00`;
+      }
+      const bookedStart = parse(
+        `${booking.booking_date} ${bookingTimeClean}`,
+        "yyyy-MM-dd HH:mm:ss",
+        new Date()
+      );
+
+      const bookedEnd = addMinutes(bookedStart, bookedService.duration);
+      const slots = generateSlotsBetween(bookedStart, bookedEnd);
+      for (const slot of slots) {
+        occupied.add(slot);
+      }
+    }
+
+    setOccupiedSlots(occupied);
+  };
+  // ----------------------------------------------------------------------
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Final validation to avoid race conditions: re-check availability of the selected slot
+    if (selectedTime && selectedService) {
+      const svc = services.find((s) => s.id === selectedService);
+      if (svc && isTimeSlotOccupied(selectedTime, svc.duration)) {
+        toast.error(
+          "Desculpe — esse horário acabou de ser reservado. Escolha outro horário."
+        );
+        return;
+      }
+    }
 
     if (
       !selectedService ||
@@ -210,7 +310,7 @@ export const BookingForm = () => {
       return;
     }
 
-    // Preparar dados do agendamento
+    // Prepare booking data
     const bookingData = {
       service_id: selectedService,
       customer_name: customerName,
@@ -244,13 +344,13 @@ export const BookingForm = () => {
           ? "\n\n✅ *Pagamento:* Pago via PIX"
           : "\n\n💳 *Pagamento:* Será realizado presencialmente";
 
+      // use dynamic whatsapp number
+      const formattedNumber = (whatsappNumber || "").replace(/\D/g, "");
       const message = `Olá! Gostaria de agendar:\n\n*Serviço:* ${
         service?.name
       }\n*Data:* ${format(selectedDate!, "dd/MM/yyyy", {
         locale: ptBR,
       })}\n*Horário:* ${selectedTime}\n*Nome:* ${customerName}\n*Telefone:* ${customerPhone}${paymentText}`;
-
-      const formattedNumber = whatsappNumber.replace(/\D/g, "");
       const whatsappUrl = `https://wa.me/${formattedNumber}?text=${encodeURIComponent(
         message
       )}`;
@@ -267,6 +367,11 @@ export const BookingForm = () => {
       setSelectedDate(undefined);
       setSelectedTime("");
       setPendingBookingData(null);
+
+      // refresh bookings for the date to update occupied slots immediately
+      if (selectedDate) {
+        fetchBookings(selectedDate);
+      }
     } catch (error) {
       console.error("Error creating booking:", error);
       toast.error("Erro ao realizar agendamento. Tente novamente.");
@@ -309,7 +414,10 @@ export const BookingForm = () => {
               </Label>
               <Select
                 value={selectedService}
-                onValueChange={setSelectedService}
+                onValueChange={(v: string) => {
+                  setSelectedService(v);
+                  setSelectedTime("");
+                }}
               >
                 <SelectTrigger className="mt-2 h-12 border-2 hover:border-primary/40 transition-colors">
                   <SelectValue placeholder="Selecione um serviço" />
@@ -404,7 +512,10 @@ export const BookingForm = () => {
                 </Label>
                 <div className="mt-2 grid grid-cols-3 gap-2 md:grid-cols-6 lg:grid-cols-9">
                   {TIME_SLOTS.map((time) => {
-                    const available = isTimeSlotAvailable(time);
+                    const occupied = occupiedSlots.has(time); // global occupancy
+                    const serviceSpecificBlocked = !isTimeSlotAvailable(time); // respects selected service duration
+                    const available = !occupied && !serviceSpecificBlocked;
+
                     return (
                       <Button
                         key={time}
@@ -413,13 +524,17 @@ export const BookingForm = () => {
                         disabled={!available}
                         onClick={() => setSelectedTime(time)}
                         className={`
-                        transition-all hover:scale-105
-                       ${!available ? "opacity-30 cursor-not-allowed" : ""}
-                       ${
-                         selectedTime === time
-                           ? "ring-2 ring-primary ring-offset-2"
-                           : ""
-                       }
+                          transition-all hover:scale-105
+                          ${
+                            !available
+                              ? "opacity-50 cursor-not-allowed bg-red-100 text-red-700"
+                              : ""
+                          }
+                          ${
+                            selectedTime === time
+                              ? "ring-2 ring-primary ring-offset-2"
+                              : ""
+                          }
                         `}
                       >
                         {time}

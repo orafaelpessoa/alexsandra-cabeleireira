@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
   Dialog,
@@ -21,7 +21,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Trash2, CheckCircle, XCircle, Calendar, Clock, DollarSign, User, Phone } from "lucide-react";
+import {
+  Trash2,
+  CheckCircle,
+  User,
+  Phone,
+  Calendar,
+  Clock,
+  DollarSign,
+} from "lucide-react";
 
 interface Booking {
   id: string;
@@ -41,11 +49,12 @@ interface Booking {
 export const BookingsManager = () => {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
+  const [openModalId, setOpenModalId] = useState<string | null>(null); // ✅ controla modal aberto
 
   useEffect(() => {
+  const fetchAndSubscribe = () => {
     fetchBookings();
 
-    // Subscribe to realtime changes
     const channel = supabase
       .channel("bookings-changes")
       .on(
@@ -56,27 +65,24 @@ export const BookingsManager = () => {
           table: "bookings",
         },
         () => {
-          fetchBookings();
+          fetchBookings().catch(console.error); // captura erro da promise
         }
       )
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
+    return () => supabase.removeChannel(channel);
+  };
+
+  fetchAndSubscribe();
+}, []);
 
   const fetchBookings = async () => {
     try {
       const { data, error } = await supabase
         .from("bookings")
-        .select(`
-          *,
-          services (name, price)
-        `)
+        .select("*, services(name, price)")
         .order("booking_date", { ascending: false })
         .order("booking_time", { ascending: false });
-
       if (error) throw error;
       setBookings(data || []);
     } catch (error) {
@@ -93,7 +99,6 @@ export const BookingsManager = () => {
         .from("bookings")
         .update({ status: status as any })
         .eq("id", id);
-
       if (error) throw error;
       toast.success("Status atualizado!");
     } catch (error) {
@@ -108,7 +113,6 @@ export const BookingsManager = () => {
         .from("bookings")
         .update({ payment_status: payment_status as any })
         .eq("id", id);
-
       if (error) throw error;
       toast.success("Status de pagamento atualizado!");
     } catch (error) {
@@ -120,9 +124,11 @@ export const BookingsManager = () => {
   const deleteBooking = async (id: string) => {
     try {
       const { error } = await supabase.from("bookings").delete().eq("id", id);
-
       if (error) throw error;
+
       toast.success("Agendamento deletado!");
+      setOpenModalId(null); // ✅ fecha o modal
+      fetchBookings(); // atualiza lista
     } catch (error) {
       console.error("Error deleting booking:", error);
       toast.error("Erro ao deletar agendamento");
@@ -181,9 +187,7 @@ export const BookingsManager = () => {
     }
   };
 
-  if (loading) {
-    return <p>Carregando agendamentos...</p>;
-  }
+  if (loading) return <p>Carregando agendamentos...</p>;
 
   return (
     <Card>
@@ -205,7 +209,9 @@ export const BookingsManager = () => {
                       <div className="space-y-2">
                         <div className="flex items-center gap-2">
                           <User className="h-4 w-4 text-primary" />
-                          <h3 className="font-semibold text-lg">{booking.customer_name}</h3>
+                          <h3 className="font-semibold text-lg">
+                            {booking.customer_name}
+                          </h3>
                         </div>
                         <div className="flex items-center gap-2 text-muted-foreground">
                           <Phone className="h-4 w-4" />
@@ -217,21 +223,25 @@ export const BookingsManager = () => {
                         <div className="flex items-center gap-2">
                           <CheckCircle className="h-4 w-4 text-primary" />
                           <p className="text-sm">
-                            <span className="font-medium">Serviço:</span> {booking.services.name}
+                            <span className="font-medium">Serviço:</span>{" "}
+                            {booking.services.name}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
                           <DollarSign className="h-4 w-4 text-primary" />
                           <p className="text-sm">
-                            <span className="font-medium">Valor:</span> R$ {booking.services.price.toFixed(2)}
+                            <span className="font-medium">Valor:</span> R${" "}
+                            {booking.services.price.toFixed(2)}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
                           <Calendar className="h-4 w-4 text-primary" />
                           <p className="text-sm">
-                            {format(new Date(booking.booking_date), "dd 'de' MMMM 'de' yyyy", {
-                              locale: ptBR,
-                            })}
+                            {format(
+                              parseISO(booking.booking_date),
+                              "dd 'de' MMMM 'de' yyyy",
+                              { locale: ptBR }
+                            )}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
@@ -243,16 +253,25 @@ export const BookingsManager = () => {
                       {booking.notes && (
                         <div className="rounded-lg bg-muted p-3">
                           <p className="text-sm">
-                            <span className="font-medium">Observações:</span> {booking.notes}
+                            <span className="font-medium">Observações:</span>{" "}
+                            {booking.notes}
                           </p>
                         </div>
                       )}
 
                       <div className="flex flex-wrap gap-2">
-                        <Badge variant={getStatusVariant(booking.status) as any}>
+                        <Badge
+                          variant={getStatusVariant(booking.status) as any}
+                        >
                           {getStatusLabel(booking.status)}
                         </Badge>
-                        <Badge variant={getPaymentStatusVariant(booking.payment_status) as any}>
+                        <Badge
+                          variant={
+                            getPaymentStatusVariant(
+                              booking.payment_status
+                            ) as any
+                          }
+                        >
                           {getPaymentStatusLabel(booking.payment_status)}
                         </Badge>
                       </div>
@@ -265,14 +284,18 @@ export const BookingsManager = () => {
                         </label>
                         <Select
                           value={booking.status}
-                          onValueChange={(value) => updateBookingStatus(booking.id, value)}
+                          onValueChange={(value) =>
+                            updateBookingStatus(booking.id, value)
+                          }
                         >
                           <SelectTrigger>
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="pending">Pendente</SelectItem>
-                            <SelectItem value="confirmed">Confirmado</SelectItem>
+                            <SelectItem value="confirmed">
+                              Confirmado
+                            </SelectItem>
                             <SelectItem value="cancelled">Cancelado</SelectItem>
                             <SelectItem value="completed">Concluído</SelectItem>
                           </SelectContent>
@@ -285,7 +308,9 @@ export const BookingsManager = () => {
                         </label>
                         <Select
                           value={booking.payment_status}
-                          onValueChange={(value) => updatePaymentStatus(booking.id, value)}
+                          onValueChange={(value) =>
+                            updatePaymentStatus(booking.id, value)
+                          }
                         >
                           <SelectTrigger>
                             <SelectValue />
@@ -293,14 +318,25 @@ export const BookingsManager = () => {
                           <SelectContent>
                             <SelectItem value="pending">Pendente</SelectItem>
                             <SelectItem value="paid">Pago</SelectItem>
-                            <SelectItem value="refunded">Reembolsado</SelectItem>
+                            <SelectItem value="refunded">
+                              Reembolsado
+                            </SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
 
-                      <Dialog>
+                      <Dialog
+                        open={openModalId === booking.id}
+                        onOpenChange={(open) =>
+                          setOpenModalId(open ? booking.id : null)
+                        }
+                      >
                         <DialogTrigger asChild>
-                          <Button variant="destructive" size="sm" className="gap-2 w-full">
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            className="gap-2 w-full"
+                          >
                             <Trash2 className="h-4 w-4" />
                             Deletar
                           </Button>
@@ -309,14 +345,17 @@ export const BookingsManager = () => {
                           <DialogHeader>
                             <DialogTitle>Confirmar exclusão</DialogTitle>
                             <DialogDescription>
-                              Tem certeza que deseja deletar este agendamento de {booking.customer_name}? Esta
-                              ação não pode ser desfeita.
+                              Tem certeza que deseja deletar este agendamento
+                              de {booking.customer_name}? Esta ação não pode
+                              ser desfeita.
                             </DialogDescription>
                           </DialogHeader>
                           <div className="flex justify-end gap-2">
                             <Button
                               variant="destructive"
-                              onClick={() => deleteBooking(booking.id)}
+                              onClick={async () => {
+                                await deleteBooking(booking.id);
+                              }}
                             >
                               Confirmar Exclusão
                             </Button>
