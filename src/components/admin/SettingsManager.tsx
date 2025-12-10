@@ -17,30 +17,18 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
+import { Upload, X } from "lucide-react";
 
 // Validação de chave PIX
 const pixKeySchema = z.string().refine(
   (value) => {
-    if (!value) return true; // Campo opcional
-    
-    // Remove espaços e caracteres especiais para validação
+    if (!value) return true;
     const cleaned = value.replace(/[.\-/\s]/g, "");
-    
-    // CPF: 11 dígitos
     if (/^\d{11}$/.test(cleaned)) return true;
-    
-    // CNPJ: 14 dígitos
     if (/^\d{14}$/.test(cleaned)) return true;
-    
-    // Email
     if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return true;
-    
-    // Telefone: +55 seguido de 10 ou 11 dígitos
     if (/^\+55\d{10,11}$/.test(cleaned)) return true;
-    
-    // Chave aleatória: UUID format
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) return true;
-    
     return false;
   },
   {
@@ -60,8 +48,9 @@ const settingsSchema = z.object({
 
 export const SettingsManager = () => {
   const [loading, setLoading] = useState(true);
-  const [qrCodeUrl, setQrCodeUrl] = useState<string>("");
-  
+  const [bannerFile, setBannerFile] = useState<File | null>(null);
+  const [bannerPreview, setBannerPreview] = useState<string>("");
+
   const form = useForm<z.infer<typeof settingsSchema>>({
     resolver: zodResolver(settingsSchema),
     defaultValues: {
@@ -98,6 +87,7 @@ export const SettingsManager = () => {
           pix_recipient_name: data.pix_recipient_name || "",
           pix_city: data.pix_city || "João Pessoa",
         });
+        setBannerPreview(data.banner_image_url || "");
       }
     } catch (error) {
       console.error("Error fetching settings:", error);
@@ -107,45 +97,90 @@ export const SettingsManager = () => {
     }
   };
 
-  const handleSubmit = async (values: z.infer<typeof settingsSchema>) => {
-    setLoading(true);
-
-    try {
-      const { data: existing } = await supabase
-        .from("site_settings")
-        .select("id")
-        .limit(1)
-        .single();
-
-      if (existing) {
-        const { error } = await supabase
-          .from("site_settings")
-          .update({
-            phone: values.phone,
-            instagram: values.instagram,
-            address: values.address,
-            banner_image_url: values.banner_image_url || null,
-            pix_key: values.pix_key || null,
-            pix_recipient_name: values.pix_recipient_name || null,
-            pix_city: values.pix_city || "João Pessoa",
-          })
-          .eq("id", existing.id);
-
-        if (error) throw error;
-      }
-
-      toast.success("Configurações atualizadas!");
-    } catch (error) {
-      console.error("Error updating settings:", error);
-      toast.error("Erro ao atualizar configurações");
-    } finally {
-      setLoading(false);
+  const handleBannerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setBannerFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => setBannerPreview(reader.result as string);
+      reader.readAsDataURL(file);
     }
   };
 
-  if (loading) {
-    return <p>Carregando configurações...</p>;
+  const handleRemoveBanner = () => {
+    setBannerFile(null);
+    setBannerPreview("");
+    form.setValue("banner_image_url", "");
+  };
+
+  const uploadBanner = async (file: File): Promise<string> => {
+  const fileExt = file.name.split(".").pop();
+  const fileName = `${Math.random()}.${fileExt}`;
+  const filePath = fileName;
+
+  const { error: uploadError } = await supabase.storage
+    .from("salon-images")
+    .upload(filePath, file);
+
+  if (uploadError) throw uploadError;
+
+  const { data } = supabase.storage
+    .from("salon-images")
+    .getPublicUrl(filePath);
+
+  return data.publicUrl;
+};
+
+
+  const handleSubmit = async (values: z.infer<typeof settingsSchema>) => {
+  setLoading(true);
+  try {
+    let bannerUrl = values.banner_image_url;
+
+    // Se o usuário enviou um novo arquivo, faz upload e substitui a URL
+    if (bannerFile) {
+      bannerUrl = await uploadBanner(bannerFile);
+    }
+
+    // 1️⃣ Pega o registro existente
+    const { data: existing, error: existingError } = await supabase
+      .from("site_settings")
+      .select("id")
+      .limit(1)
+      .single();
+
+    if (existingError) throw existingError;
+
+    // 2️⃣ Faz o UPDATE corretamente
+    const { error: updateError } = await supabase
+      .from("site_settings")
+      .update({
+        phone: values.phone,
+        instagram: values.instagram,
+        address: values.address,
+        banner_image_url: bannerUrl || null,
+        pix_key: values.pix_key || null,
+        pix_recipient_name: values.pix_recipient_name || null,
+        pix_city: values.pix_city || "João Pessoa",
+      })
+      .eq("id", existing.id);
+
+    if (updateError) throw updateError;
+
+    toast.success("Configurações atualizadas!");
+
+    setBannerPreview(bannerUrl || "");
+    
+  } catch (error) {
+    console.error("Error updating settings:", error);
+    toast.error("Erro ao atualizar configurações");
+  } finally {
+    setLoading(false);
   }
+};
+
+
+  if (loading) return <p>Carregando configurações...</p>;
 
   return (
     <Card>
@@ -155,6 +190,8 @@ export const SettingsManager = () => {
       <CardContent>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
+
+            {/* Telefone */}
             <FormField
               control={form.control}
               name="phone"
@@ -169,6 +206,7 @@ export const SettingsManager = () => {
               )}
             />
 
+            {/* Instagram */}
             <FormField
               control={form.control}
               name="instagram"
@@ -183,6 +221,7 @@ export const SettingsManager = () => {
               )}
             />
 
+            {/* Endereço */}
             <FormField
               control={form.control}
               name="address"
@@ -197,23 +236,55 @@ export const SettingsManager = () => {
               )}
             />
 
+            {/* Banner */}
             <FormField
               control={form.control}
               name="banner_image_url"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>URL da Imagem do Banner</FormLabel>
-                  <FormControl>
-                    <Input placeholder="https://..." {...field} />
-                  </FormControl>
-                  <FormDescription>
-                    Deixe em branco para usar a imagem padrão
-                  </FormDescription>
+                  <FormLabel>Banner do Site</FormLabel>
+                  {bannerPreview ? (
+                    <div className="relative mt-2">
+                      <img
+                        src={bannerPreview}
+                        alt="Preview do Banner"
+                        className="w-full h-48 object-cover rounded-lg"
+                      />
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="icon"
+                        className="absolute top-2 right-2"
+                        onClick={handleRemoveBanner}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="mt-2">
+                      <Input
+                        id="banner"
+                        type="file"
+                        accept="image/*"
+                        onChange={handleBannerChange}
+                        className="hidden"
+                      />
+                      <Label
+                        htmlFor="banner"
+                        className="flex items-center justify-center gap-2 p-4 border-2 border-dashed rounded-lg cursor-pointer hover:bg-accent"
+                      >
+                        <Upload className="h-5 w-5" />
+                        <span>Clique para fazer upload</span>
+                      </Label>
+                    </div>
+                  )}
+                  <FormDescription>Deixe em branco para usar a imagem padrão</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
             />
 
+            {/* PIX */}
             <FormField
               control={form.control}
               name="pix_key"
@@ -221,13 +292,10 @@ export const SettingsManager = () => {
                 <FormItem>
                   <FormLabel>Chave PIX</FormLabel>
                   <FormControl>
-                    <Input 
-                      placeholder="CPF, CNPJ, email, +5583988888888 ou UUID" 
-                      {...field} 
-                    />
+                    <Input placeholder="CPF, CNPJ, email, +5583988888888 ou UUID" {...field} />
                   </FormControl>
                   <FormDescription>
-                    Formatos aceitos: CPF (11 dígitos), CNPJ (14 dígitos), email, 
+                    Formatos aceitos: CPF (11 dígitos), CNPJ (14 dígitos), email,
                     telefone (+55XXXXXXXXXXX) ou chave aleatória (UUID)
                   </FormDescription>
                   <FormMessage />
@@ -244,9 +312,7 @@ export const SettingsManager = () => {
                   <FormControl>
                     <Input placeholder="Seu nome completo" {...field} />
                   </FormControl>
-                  <FormDescription>
-                    Nome que aparecerá no pagamento PIX
-                  </FormDescription>
+                  <FormDescription>Nome que aparecerá no pagamento PIX</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -261,9 +327,7 @@ export const SettingsManager = () => {
                   <FormControl>
                     <Input placeholder="João Pessoa" {...field} />
                   </FormControl>
-                  <FormDescription>
-                    Cidade do beneficiário
-                  </FormDescription>
+                  <FormDescription>Cidade do beneficiário</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}

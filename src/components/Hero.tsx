@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import heroImage from "@/assets/hero-salon.jpg";
+import { Link } from "react-router-dom";
 
 interface HeroProps {
   onViewServices: () => void;
@@ -11,11 +12,18 @@ interface HeroProps {
 export const Hero = ({ onViewServices, onBookNow, bannerImageUrl }: HeroProps) => {
   return (
     <section className="relative h-screen w-full overflow-hidden">
+
+      <Link
+        to="/admin"
+        className="fixed top-1 right-1 z-[9999] h-14 w-14 opacity-0 cursor-pointer"
+
+      />
+
       {/* Background Image */}
-      <div 
+      <div
         className="absolute inset-0 bg-cover bg-center"
-        style={{ 
-          backgroundImage: `url(${bannerImageUrl || heroImage})` 
+        style={{
+          backgroundImage: `url(${bannerImageUrl || heroImage})`,
         }}
       >
         {/* Overlay */}
@@ -47,6 +55,7 @@ export const Hero = ({ onViewServices, onBookNow, bannerImageUrl }: HeroProps) =
             Beleza e Cuidado Profissional
           </motion.p>
 
+          {/* Buttons */}
           <motion.div
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
@@ -60,6 +69,7 @@ export const Hero = ({ onViewServices, onBookNow, bannerImageUrl }: HeroProps) =
             >
               Ver Serviços
             </Button>
+
             <Button
               size="lg"
               variant="outline"
