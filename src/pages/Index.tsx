@@ -48,7 +48,7 @@ const Index = () => {
   return (
     <div className="min-h-screen">
       <Hero
-        bannerImageUrl={bannerUrl || heroImage} // fallback para imagem padrão
+        bannerImageUrl={bannerUrl || heroImage} 
         onViewServices={scrollToServices}
         onBookNow={scrollToBooking}
       />

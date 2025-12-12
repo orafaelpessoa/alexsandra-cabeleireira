@@ -9,30 +9,33 @@ interface HeroProps {
   bannerImageUrl?: string;
 }
 
-export const Hero = ({ onViewServices, onBookNow, bannerImageUrl }: HeroProps) => {
+export const Hero = ({
+  onViewServices,
+  onBookNow,
+  bannerImageUrl,
+}: HeroProps) => {
   return (
     <section className="relative h-screen w-full overflow-hidden">
-
       <Link
         to="/admin"
         className="fixed top-1 right-1 z-[9999] h-14 w-14 opacity-0 cursor-pointer"
-
       />
 
       {/* Background Image */}
-      <div
-        className="absolute inset-0 bg-cover bg-center"
-        style={{
-          backgroundImage: `url(${bannerImageUrl || heroImage})`,
-        }}
-      >
-        {/* Overlay */}
-        <div className="absolute inset-0 bg-gradient-hero" />
-      </div>
+    <div
+      className="absolute inset-0 bg-cover bg-top md:bg-center"
+      style={{
+        backgroundImage: `url(${bannerImageUrl || heroImage})`,
+      }}
+    >
+      {/* Overlay */}
+      <div className="absolute inset-0 bg-gradient-hero" />
+    </div>
 
       {/* Content */}
       <div className="relative z-10 flex h-full items-center justify-center px-4">
-        <div className="text-center text-white">
+        <div className="text-center text-white translate-y-[120px] md:translate-y-[160px]">
+
           <motion.h1
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}

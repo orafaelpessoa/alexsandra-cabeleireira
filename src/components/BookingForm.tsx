@@ -146,57 +146,56 @@ export const BookingForm = () => {
 
   // -------------------- isTimeSlotOccupied (robust final) --------------------
   const isTimeSlotOccupied = (time: string, duration: number) => {
-  if (!selectedDate) return false;
+    if (!selectedDate) return false;
 
-  const dateStr = format(selectedDate, "yyyy-MM-dd");
+    const dateStr = format(selectedDate, "yyyy-MM-dd");
 
-  // Normaliza o slot selecionado para HH:mm:00
-  const slotWithSeconds = `${time}:00`;
+    // Normaliza o slot selecionado para HH:mm:00
+    const slotWithSeconds = `${time}:00`;
 
-  const timeDate = parse(
-    `${dateStr} ${slotWithSeconds}`,
-    "yyyy-MM-dd HH:mm:ss",
-    new Date()
-  );
-
-  if (isNaN(timeDate.getTime())) return false;
-
-  const currentEnd = addMinutes(timeDate, duration);
-
-  // Verifica cada agendamento existente
-  for (const booking of bookings) {
-    if (booking.booking_date !== dateStr) continue;
-
-    let bookingTimeClean = booking.booking_time;
-    if (bookingTimeClean.length === 5) {
-      bookingTimeClean = `${bookingTimeClean}:00`;
-    }
-
-    const bookedStart = parse(
-      `${booking.booking_date} ${bookingTimeClean}`,
+    const timeDate = parse(
+      `${dateStr} ${slotWithSeconds}`,
       "yyyy-MM-dd HH:mm:ss",
       new Date()
     );
 
-    if (isNaN(bookedStart.getTime())) continue;
+    if (isNaN(timeDate.getTime())) return false;
 
-    const bookedService = services.find((s) => s.id === booking.service_id);
-    if (!bookedService) continue;
+    const currentEnd = addMinutes(timeDate, duration);
 
-    const bookedEnd = addMinutes(bookedStart, bookedService.duration);
+    // Verifica cada agendamento existente
+    for (const booking of bookings) {
+      if (booking.booking_date !== dateStr) continue;
 
-    // AQUI está a lógica correta (sempre pra frente)
-    const overlap =
-      (timeDate >= bookedStart && timeDate < bookedEnd) ||
-      (currentEnd > bookedStart && currentEnd <= bookedEnd) ||
-      (timeDate <= bookedStart && currentEnd >= bookedEnd);
+      let bookingTimeClean = booking.booking_time;
+      if (bookingTimeClean.length === 5) {
+        bookingTimeClean = `${bookingTimeClean}:00`;
+      }
 
-    if (overlap) return true;
-  }
+      const bookedStart = parse(
+        `${booking.booking_date} ${bookingTimeClean}`,
+        "yyyy-MM-dd HH:mm:ss",
+        new Date()
+      );
 
-  return false;
-};
+      if (isNaN(bookedStart.getTime())) continue;
 
+      const bookedService = services.find((s) => s.id === booking.service_id);
+      if (!bookedService) continue;
+
+      const bookedEnd = addMinutes(bookedStart, bookedService.duration);
+
+      // AQUI está a lógica correta (sempre pra frente)
+      const overlap =
+        (timeDate >= bookedStart && timeDate < bookedEnd) ||
+        (currentEnd > bookedStart && currentEnd <= bookedEnd) ||
+        (timeDate <= bookedStart && currentEnd >= bookedEnd);
+
+      if (overlap) return true;
+    }
+
+    return false;
+  };
 
   // ----------------------------------------------------------------------
 
@@ -419,14 +418,28 @@ export const BookingForm = () => {
                   setSelectedTime("");
                 }}
               >
-                <SelectTrigger className="mt-2 h-12 border-2 hover:border-primary/40 transition-colors">
+                <SelectTrigger className="mt-2 h-12 border-2 hover:border-primary/40 transition-colors w-full">
                   <SelectValue placeholder="Selecione um serviço" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent
+                  sideOffset={8}
+                  className="w-full md:w-[var(--radix-select-trigger-width)] max-w-[90vw] md:max-w-none md:left-0"
+                >
                   {services.map((service) => (
-                    <SelectItem key={service.id} value={service.id}>
-                      {service.name} - R$ {service.price.toFixed(2)} (
-                      {formatDuration(service.duration)})
+                    <SelectItem
+                      key={service.id}
+                      value={service.id}
+                      className="p-2 h-auto"
+                    >
+                      <div className="flex flex-col md:flex-row w-full justify-between items-start md:items-center text-sm">
+                        <span className="font-medium truncate pr-2">
+                          {service.name}
+                        </span>
+                        <span className="text-xs text-muted-foreground pt-0.5 md:pt-0 md:text-sm md:flex-shrink-0">
+                          R$ {service.price.toFixed(2)} (
+                          {formatDuration(service.duration)})
+                        </span>
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -471,26 +484,35 @@ export const BookingForm = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3 }}
-              className="space-y-2"
+              className="space-y-2 w-full max-w-[390px] mx-auto px-4"
             >
               <Label className="text-base font-semibold">Escolha a Data</Label>
-              <div className="flex justify-center rounded-lg border-2 border-primary/20 bg-card p-4 hover:border-primary/40 transition-colors shadow-soft">
+
+              <div className="w-full rounded-lg border-2 border-primary/20 bg-card p-1 sm:p-4 hover:border-primary/40 transition-colors shadow-soft flex justify-center overflow-hidden">
                 <Calendar
                   mode="single"
                   selected={selectedDate}
                   onSelect={setSelectedDate}
                   disabled={(date) => {
-                    // Desabilitar domingos e segundas
+                    // ... (sua lógica de desativação)
                     const dayOfWeek = date.getDay();
                     if (dayOfWeek === 0 || dayOfWeek === 1) return true;
-                    // Desabilitar datas passadas
+
                     const today = new Date();
                     today.setHours(0, 0, 0, 0);
                     if (date < today) return true;
-                    // Desabilitar datas totalmente ocupadas
+
                     return !isDateAvailable(date);
                   }}
-                  className="rounded-md pointer-events-auto"
+                  className="rounded-md pointer-events-auto p-0 w-full 
+                             [&_.rdp-caption]:w-full 
+                             [&_.rdp-caption]:flex 
+                             [&_.rdp-caption]:justify-center 
+                             [&_.rdp-nav]:w-full // Garante que a navegação ocupe 100%
+                             [&_.rdp-nav_button]:flex // Força as setas a serem flexíveis e visíveis
+                             [&_.rdp-nav_button]:justify-center 
+                             [&_.rdp-nav_button]:items-center
+                             [&_.rdp-day_--outside]:hidden"
                   locale={ptBR}
                 />
               </div>

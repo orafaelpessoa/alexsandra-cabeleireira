@@ -28,7 +28,6 @@ export default function Admin() {
         return;
       }
 
-      // Check if user is admin
       const { data: roles, error } = await supabase
         .from("user_roles")
         .select("role")
@@ -85,7 +84,16 @@ export default function Admin() {
         </div>
 
         <Tabs defaultValue="bookings" className="space-y-8">
-          <TabsList className="grid w-full grid-cols-2 lg:grid-cols-4">
+          <TabsList 
+            className="
+              flex 
+              w-full 
+              overflow-x-auto 
+              whitespace-nowrap 
+              justify-start 
+              lg:grid lg:grid-cols-4 lg:overflow-visible
+            "
+          >
             <TabsTrigger value="bookings">Agendamentos</TabsTrigger>
             <TabsTrigger value="services">Serviços</TabsTrigger>
             <TabsTrigger value="products">Produtos</TabsTrigger>

@@ -47,7 +47,7 @@ All colors MUST be HSL.
 
     /* Gradients */
     --gradient-primary: linear-gradient(135deg, hsl(39 35% 45%) 0%, hsl(39 40% 58%) 100%);
-    --gradient-hero: linear-gradient(180deg, transparent 0%, hsla(0 0% 0% / 0.7) 100%);
+    --gradient-hero: linear-gradient(to top, hsla(0 0% 0% / 0.9) 0%, hsla(0 0% 0% / 0.6) 60%, transparent 95%);
     --gradient-card: linear-gradient(145deg, hsl(0 0% 100%) 0%, hsl(39 25% 96%) 100%);
 
     /* Shadows */
@@ -95,5 +95,26 @@ All colors MUST be HSL.
   .hover-lift:hover {
     transform: translateY(-4px);
     box-shadow: var(--shadow-medium);
+  }
+}
+
+/* Correção de Responsividade para o Dropdown (SelectContent) no Mobile */
+
+/* Usa a media query para aplicar regras APENAS em telas menores que 768px (Mobile) */
+@media screen and (max-width: 768px) {
+  /* Alvo o contêiner de popover flutuante gerado pelo Radix/Shadcn. */
+  /* Isso garante que ele não vaze para fora da tela. */
+  [data-radix-popper-content-wrapper] {
+    /* Força a largura para 90% da viewport */
+    width: 90vw !important;
+    max-width: 90vw !important;
+    
+    /* Centraliza o popover na tela horizontalmente */
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    
+    /* Zera margens laterais que poderiam causar o vazamento */
+    margin-left: 0 !important;
+    margin-right: 0 !important;
   }
 }
