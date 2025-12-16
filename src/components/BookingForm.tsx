@@ -344,20 +344,23 @@ export const BookingForm = () => {
           : "\n\n💳 *Pagamento:* Será realizado presencialmente";
 
       // use dynamic whatsapp number
-      const formattedNumber = (whatsappNumber || "").replace(/\D/g, "");
+      let formattedNumber = (whatsappNumber || "").replace(/\D/g, "");
+
+      if (!formattedNumber.startsWith("55")) {
+        formattedNumber = `55${formattedNumber}`;
+      }
+
       const message = `Olá! Gostaria de agendar:\n\n*Serviço:* ${
         service?.name
       }\n*Data:* ${format(selectedDate!, "dd/MM/yyyy", {
         locale: ptBR,
       })}\n*Horário:* ${selectedTime}\n*Nome:* ${customerName}\n*Telefone:* ${customerPhone}${paymentText}`;
+
       const whatsappUrl = `https://wa.me/${formattedNumber}?text=${encodeURIComponent(
         message
       )}`;
-      window.open(whatsappUrl, "_blank");
 
-      toast.success(
-        "Agendamento realizado! Você será redirecionado para o WhatsApp."
-      );
+      window.location.href = whatsappUrl;
 
       // Reset form
       setSelectedService("");
